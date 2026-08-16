@@ -1,5 +1,7 @@
 # Freezer Monitor
 
+<img src="Images/thumbnail.jpg" alt="thumbnail" width="500">
+
 Battery-powered freezer monitor for Home Assistant and ESPHome. It continuously watches freezer temperature using a flat printed circuit sensor probe, wakes Home Assistant immediately for high-temperature events, and uses RTC-controlled power cycling for long battery life.
 
 Setup Video: https://youtu.be/nzpPNruYSMk
