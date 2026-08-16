@@ -2,11 +2,11 @@
 
 Battery-powered freezer monitor for Home Assistant and ESPHome. It continuously watches freezer temperature using a flat printed circuit sensor probe, wakes Home Assistant immediately for high-temperature events, and uses RTC-controlled power cycling for long battery life.
 
-Product Video:
+Setup Video: https://youtu.be/nzpPNruYSMk
 
-Technical Video:
+Technical Video: https://youtu.be/-qzcmOnRHUw
 
-Etsy (purchase): 
+Etsy (purchase): https://www.etsy.com/listing/4555225886/freezer-monitor-for-home-assistant
 
 ## Requirements
 
@@ -80,8 +80,8 @@ The helper cannot power on the monitor immediately and cannot apply its value du
 | **Battery Percentage** / **Battery Voltage** | Battery condition reported during an awake period. Percentage is an estimate from the configured LiPo voltage curve. Consider this approximate rather than precise. |
 | **Freezer Temperature** | Temperature at the end of the probe. |
 | **High Temp Alert** | On while the probe sensor reports a high-temperature condition. |
-| **Threshold Status** | Reports threshold write or validation status. |
 | **Last Wake Reason** / **Last Wake Time** | Last RTC wake cause and time. |
+| **Threshold Status** | Reports threshold write or validation status. |
 |||
 <img src="Images/Sensors.png" alt="App Sensors" width="500">
 
