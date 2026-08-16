@@ -1,0 +1,592 @@
+substitutions:
+  name: "freezer-monitor"
+  friendly_name: "Freezer Monitor"
+  
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  name_add_mac_suffix: true
+  project:
+    name: "techdregs.freezer-monitor"
+    version: "0.1.0"
+  on_boot:
+    - priority: 500
+      then:
+        - switch.turn_on: tmp_power
+
+esp32:
+  variant: esp32c3
+  cpu_frequency: 80MHZ
+  framework:
+    type: esp-idf
+
+preferences:
+  flash_write_interval: 1s
+
+logger:
+  id: logger_component
+  level: WARN
+  baud_rate: 0
+
+api:
+  id: api_server
+  encryption: {}
+
+provisioning:
+  id: provisioning_component
+  timeout: 10min
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+dashboard_import:
+  package_import_url: github://techdregs/Freezer_Monitor/YAML/Freezer_Monitor.yaml@main
+  import_full_config: true
+
+wifi:
+  id: wifi_component
+  fast_connect: True
+  ap:
+    ssid: "${friendly_name} Setup"
+
+captive_portal:
+  id: captive_portal_component
+
+esp32_improv:
+  id: improv_ble
+  authorizer: none
+
+safe_mode:
+  id: safe_mode_component
+  boot_is_good_after: 
+    seconds: 10
+
+globals:
+  - id: cycle_fired
+    type: bool
+    restore_value: no
+    initial_value: "false" 
+  - id: woke_from_event
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: keep_on_for_testing
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+  - id: next_alarm_hour
+    type: uint16_t
+    restore_value: no
+    initial_value: "0"
+  - id: next_alarm_minute
+    type: uint16_t
+    restore_value: no
+    initial_value: "0"
+  - id: next_alarm_valid
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/techdregs/TMP102_Extended
+      ref: main
+      path: .
+    components: [tmp102_extended]
+    refresh: always
+    
+  - source:
+      type: git
+      url: https://github.com/techdregs/RX8XXX
+      ref: main
+      path: ESPHome
+    components: [rx8xxx]
+    refresh: always
+
+switch:
+  - platform: gpio
+    pin: GPIO10 #pin controls power to ambient TMP102 sensor only
+    id: tmp_power
+    internal: true
+    restore_mode: ALWAYS_ON
+
+  - platform: template
+    id: keep_on_for_testing_switch
+    name: "Keep On for Configuration"
+    icon: mdi:test-tube
+    entity_category: config
+    restore_mode: disabled
+
+    lambda: |-
+      return id(keep_on_for_testing);
+
+    turn_on_action:
+      - globals.set:
+          id: keep_on_for_testing
+          value: "true"
+      - logger.log: "Testing mode enabled: PMOS power cycle disabled"
+
+      # If the optional HA helper exists, keep it synchronized with this control.
+      - if:
+          condition:
+            lambda: return id(keep_awake_requested).has_state();
+          then:
+            - homeassistant.action:
+                action: input_boolean.turn_on
+                data:
+                  entity_id: input_boolean.freezer_monitor_keep_awake
+
+    turn_off_action:
+      - globals.set:
+          id: keep_on_for_testing
+          value: "false"
+      - logger.log: "Testing mode disabled: normal PMOS cycling enabled"
+
+      # If the optional HA helper exists, keep it synchronized with this control.
+      - if:
+          condition:
+            lambda: return id(keep_awake_requested).has_state();
+          then:
+            - homeassistant.action:
+                action: input_boolean.turn_off
+                data:
+                  entity_id: input_boolean.freezer_monitor_keep_awake
+
+binary_sensor:
+  # Optional persistent Keep Awake control. If the helper does not exist in HA,
+  # this sensor has no state and the normal device switch remains independent.
+  - platform: homeassistant
+    id: keep_awake_requested
+    entity_id: input_boolean.freezer_monitor_keep_awake
+    internal: true
+    trigger_on_initial_state: true
+    on_state:
+      then:
+        - if:
+            condition:
+              binary_sensor.is_on: keep_awake_requested
+            then:
+              - switch.turn_on: keep_on_for_testing_switch
+            else:
+              - switch.turn_off: keep_on_for_testing_switch
+
+i2c:
+  id: i2c_bus
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+
+time:
+  - platform: rx8xxx
+    id: rx8111
+    model: RX8111CE
+    update_interval: 5s
+    timestamp_enabled: true
+    timestamp_record_mode: overwrite
+    event_timestamp:
+      id: event_timestamp
+      internal: true
+    event_level: LOW
+    evin_pull: pullup_500k
+    evin_filter: 2
+    on_event:
+      then:
+        - globals.set:
+            id: woke_from_event
+            value: "true"
+        - delay: 100ms
+        - script.execute: publish_wake_status
+        - logger.log: "Woke from EVENT — Temp Exceeded"
+    event_flag:
+      id: event_flag
+      internal: true
+    alarm_enabled: true
+    alarm_hour: 0
+    alarm_minute: 0
+    alarm_second: 0
+    on_alarm:
+      then:
+        - globals.set:
+            id: woke_from_event
+            value: "false"
+        - script.execute: publish_wake_status
+        - logger.log: "Woke from ALARM — Daily heartbeat"
+    alarm_flag:
+      id: alarm_flag
+      internal: true
+
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      then:
+        - logger.log:
+            format: "HA time sync → writing to RTC"
+            level: INFO
+        - rx8xxx.write_time:
+            id: rx8111
+
+sensor:
+  - platform: tmp102_extended
+    id: ambient_temperature
+    name: "Ambient"
+    address: 0x49
+    i2c_id: i2c_bus
+    filters:
+      - lambda: return x * (9.0 / 5.0) + 32.0;
+    unit_of_measurement: °F
+    update_interval: 5s
+  
+  - platform: tmp102_extended
+    id: freezer_temperature
+    name: "Freezer Temperature"
+    address: 0x48
+    i2c_id: i2c_bus
+    conversion_rate: 0.25Hz
+    alert:
+      id: high_temp_alert
+      name: "High Temp Alert"
+    alert_polarity: active_low
+    thermostat_mode: comparator
+    temperature_high:
+      id: high_temp_threshold
+      name: "High Temp Threshold"
+      initial_value: "10°F"
+      restore_value: true
+    temperature_low: 
+      id: clear_temp_threshold
+      name: "Clear Temp Threshold"
+      initial_value: "9°F"
+      restore_value: true
+    threshold_status:
+      id: threshold_status
+      name: "Threshold Status"
+    filters:
+      - lambda: return x * (9.0 / 5.0) + 32.0;
+    unit_of_measurement: "°F"
+    update_interval: 5s
+    
+  - platform: adc
+    pin: GPIO1
+    name: "Battery Voltage"
+    id: battery_voltage
+    attenuation: 12dB         
+    filters:
+      - multiply: 1.548      # based on divider ratio adjusted for real measurements
+      - median:
+          window_size: 5
+          send_every: 5       
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    update_interval: 1s
+
+  - platform: template
+    name: "Battery Percentage"
+    id: battery_percentage
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      return id(battery_voltage).state;
+    filters:
+      - calibrate_linear:
+          method: exact
+          datapoints:
+          # voltage : percent
+          - 3.50 -> 0
+          - 4.08 -> 75
+          - 4.13 -> 90
+          - 4.20 -> 100
+      - clamp:
+          min_value: 0
+          max_value: 100
+  
+  - platform: uptime
+    id: device_uptime
+    name: "Device Uptime"
+    update_interval: 5s
+
+  - platform: wifi_signal
+    name: "WiFi Signal dBm"
+    id: wifi_db
+    update_interval: 5s
+    
+text_sensor:
+  - platform: template
+    id: last_wake_reason
+    name: "Last Wake Reason"
+    icon: mdi:power
+
+  - platform: template
+    id: last_wake_time
+    name: "Last Wake Time"
+    icon: mdi:clock-outline
+    
+number:
+  - platform: template
+    id: wake_start_hour
+    name: "Wake Start Hour (UTC)"
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: 12
+    restore_value: true
+    optimistic: true
+    entity_category: config
+    on_value:
+      then:
+        - script.execute: set_next_alarm
+
+  - platform: template
+    id: wake_start_minute
+    name: "Wake Start Minute"
+    min_value: 0
+    max_value: 59
+    step: 1
+    initial_value: 0
+    restore_value: true
+    optimistic: true
+    entity_category: config
+    on_value:
+      then:
+        - script.execute: set_next_alarm
+
+select:
+  - platform: template
+    id: wake_interval_hours
+    name: "Wake Interval Hours"
+    options:
+      - "0"
+      - "1"
+      - "2"
+      - "4"
+      - "6"
+      - "8"
+      - "12"
+    initial_option: "12"
+    restore_value: true
+    optimistic: true
+    entity_category: config
+    on_value:
+      then:
+        - script.execute: set_next_alarm
+
+button:
+  - platform: template
+    id: acknowledge_freezer_alarm
+    name: "Acknowledge Freezer Alarm"
+    on_press:
+      then:
+        - rx8xxx.clear_event_flag:
+            id: rx8111
+        - if:
+            condition:
+              lambda: 'return !id(keep_on_for_testing);'
+            then:
+              - script.execute: pmos_cycle
+
+deep_sleep:
+  id: deep_sleep_dummy #Prevents HA from showing "unavailable"
+
+script:
+  - id: publish_wake_status
+    mode: restart
+    then:
+      - lambda: |-
+          const bool alarm = id(alarm_flag).state;
+          const bool event = id(event_flag).state;
+
+          if (alarm && event) {
+            id(last_wake_reason).publish_state("Alarm + Event");
+          } else if (event) {
+            id(last_wake_reason).publish_state("Event");
+          } else if (alarm) {
+            id(last_wake_reason).publish_state("Alarm");
+          } else {
+            id(last_wake_reason).publish_state("Unknown");
+          }
+
+          if (event && id(event_timestamp).has_state()) {
+            id(last_wake_time).publish_state(id(event_timestamp).state);
+            return;
+          }
+
+          auto now = id(rx8111).utcnow();
+          if (now.is_valid()) {
+            char timestamp[32];
+            snprintf(timestamp, sizeof(timestamp), "%04u-%02u-%02uT%02u:%02u:%02uZ",
+                     static_cast<unsigned>(now.year), static_cast<unsigned>(now.month),
+                     static_cast<unsigned>(now.day_of_month), static_cast<unsigned>(now.hour),
+                     static_cast<unsigned>(now.minute), static_cast<unsigned>(now.second));
+            id(last_wake_time).publish_state(timestamp);
+          } else {
+            id(last_wake_time).publish_state("Unknown");
+          }
+  - id: set_next_alarm
+    mode: restart
+    then:
+      - rx8xxx.read_time:
+          id: rx8111
+      - lambda: |-
+          id(next_alarm_valid) = false;
+
+          auto now = id(rx8111).utcnow();
+          if (!now.is_valid()) {
+            ESP_LOGE("rtc_alarm", "RTC time invalid; leaving existing alarm");
+            return;
+          }
+
+          const uint32_t start_hour = static_cast<uint32_t>(id(wake_start_hour).state + 0.5f);
+          const uint32_t start_minute = static_cast<uint32_t>(id(wake_start_minute).state + 0.5f);
+          if (start_hour > 23 || start_minute > 59) {
+            ESP_LOGE("rtc_alarm", "Invalid wake time %u:%u; leaving existing alarm",
+                     static_cast<unsigned>(start_hour), static_cast<unsigned>(start_minute));
+            return;
+          }
+
+          const auto interval_option = id(wake_interval_hours).current_option();
+          uint32_t interval_hours = 0;
+          if (interval_option == "0") {
+            interval_hours = 0;
+          } else if (interval_option == "1") {
+            interval_hours = 1;
+          } else if (interval_option == "2") {
+            interval_hours = 2;
+          } else if (interval_option == "4") {
+            interval_hours = 4;
+          } else if (interval_option == "6") {
+            interval_hours = 6;
+          } else if (interval_option == "8") {
+            interval_hours = 8;
+          } else if (interval_option == "12") {
+            interval_hours = 12;
+          } else {
+            ESP_LOGE("rtc_alarm", "Invalid wake interval; leaving existing alarm");
+            return;
+          }
+
+          const uint32_t now_minute_of_day =
+              now.hour * 60UL + now.minute;
+
+          const uint32_t start_minute_of_day =
+              start_hour * 60UL + start_minute;
+          
+          uint32_t target_minute_of_day;
+          
+          if (interval_hours == 0) {
+            // Once daily at the configured start time.
+            target_minute_of_day = start_minute_of_day;
+          
+            if (target_minute_of_day <= now_minute_of_day) {
+              target_minute_of_day += 1440UL;
+            }
+          } else {
+            const uint32_t step_minutes = interval_hours * 60UL;
+          
+            // Minutes elapsed since the most recent occurrence of the
+            // configured start time, including across midnight.
+            const uint32_t elapsed_minutes =
+                (now_minute_of_day + 1440UL - start_minute_of_day) % 1440UL;
+          
+            // Select the first interval strictly after the current minute.
+            const uint32_t intervals_elapsed =
+                elapsed_minutes / step_minutes;
+          
+            target_minute_of_day =
+                start_minute_of_day +
+                (intervals_elapsed + 1UL) * step_minutes;
+          }
+          
+          target_minute_of_day %= 1440UL;
+          id(next_alarm_hour) = target_minute_of_day / 60UL;
+          id(next_alarm_minute) = target_minute_of_day % 60UL;
+          id(next_alarm_valid) = true;
+
+          ESP_LOGI("rtc_alarm", "Next alarm: %02u:%02u UTC (start %02u:%02u, interval %u h)",
+                   static_cast<unsigned>(id(next_alarm_hour)), static_cast<unsigned>(id(next_alarm_minute)),
+                   static_cast<unsigned>(start_hour), static_cast<unsigned>(start_minute),
+                   static_cast<unsigned>(interval_hours));
+      - if:
+          condition:
+            lambda: 'return id(next_alarm_valid);'
+          then:
+            - rx8xxx.set_alarm:
+                id: rx8111
+                enabled: true
+                hour: !lambda "return id(next_alarm_hour);"
+                minute: !lambda "return id(next_alarm_minute);"
+                second: 0
+  - id: pmos_cycle
+    mode: restart
+    then:
+      - script.execute: set_next_alarm
+      - script.wait: set_next_alarm
+      - if:
+          condition:
+            lambda: |-
+              return id(next_alarm_valid);
+          then:
+            - logger.log:
+                level: WARN
+                format: "Next RTC alarm set; power cut routine started."
+
+            # Lambda to simulate normal device disconnect. Prevents HA from showing "unavailable".
+            - lambda: |-
+                using namespace esphome::api;
+      
+                if (global_api_server != nullptr) {
+                  global_api_server->on_shutdown();  // initiate polite disconnect
+      
+                  // Give it a short window to flush disconnect + close connections.
+                  const uint32_t start = millis();
+                  while (millis() - start < 5000) {
+                    if (global_api_server->teardown())  // true when finished
+                      break;
+                    delay(10);
+                  }
+                }
+            #- delay: 10ms #add delay if alarm isn't setting.
+            
+            - logger.log:
+                level: WARN
+                format: "Cutting power"
+
+            - switch.turn_off: tmp_power
+
+            - rx8xxx.clear_alarm_flag:
+                id: rx8111
+
+            - rx8xxx.clear_event_flag:
+                id: rx8111
+
+            - delay: 100ms
+
+            - logger.log:
+                level: ERROR
+                format: "Power appears to still be on"
+
+          else:
+            - logger.log:
+                level: ERROR
+                format: "Power cut blocked: unable to set next RTC alarm; retrying in 5 seconds"
+
+            - delay: 5s
+
+            - globals.set:
+                id: cycle_fired
+                value: "false"
+
+interval:
+  - id: timing_interval
+    interval: 1s
+    startup_delay: 12s
+    then:
+    - if:
+        condition:
+          lambda: 'return !id(keep_on_for_testing) && !id(cycle_fired) && !id(woke_from_event);'
+        then:
+          - globals.set:
+              id: cycle_fired
+              value: "true"
+          - script.execute: pmos_cycle
