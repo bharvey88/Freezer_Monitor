@@ -8,7 +8,7 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: "techdregs.freezer-monitor"
-    version: "0.1.0"
+    version: "0.1.1"
   on_boot:
     - priority: 500
       then:
@@ -128,10 +128,12 @@ switch:
           value: "true"
       - logger.log: "Testing mode enabled: PMOS power cycle disabled"
 
-      # If the optional HA helper exists, keep it synchronized with this control.
+      # If the optional HA helper exists and differs, keep it synchronized.
       - if:
           condition:
-            lambda: return id(keep_awake_requested).has_state();
+            lambda: |-
+              return id(keep_awake_requested).has_state() &&
+                     !id(keep_awake_requested).state;
           then:
             - homeassistant.action:
                 action: input_boolean.turn_on
@@ -144,10 +146,12 @@ switch:
           value: "false"
       - logger.log: "Testing mode disabled: normal PMOS cycling enabled"
 
-      # If the optional HA helper exists, keep it synchronized with this control.
+      # If the optional HA helper exists and differs, keep it synchronized.
       - if:
           condition:
-            lambda: return id(keep_awake_requested).has_state();
+            lambda: |-
+              return id(keep_awake_requested).has_state() &&
+                     id(keep_awake_requested).state;
           then:
             - homeassistant.action:
                 action: input_boolean.turn_off
@@ -164,13 +168,8 @@ binary_sensor:
     trigger_on_initial_state: true
     on_state:
       then:
-        - if:
-            condition:
-              binary_sensor.is_on: keep_awake_requested
-            then:
-              - switch.turn_on: keep_on_for_testing_switch
-            else:
-              - switch.turn_off: keep_on_for_testing_switch
+        - lambda: |-
+            id(keep_on_for_testing) = x;
 
 i2c:
   id: i2c_bus

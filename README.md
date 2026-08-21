@@ -8,6 +8,8 @@ Setup Video: https://youtu.be/nzpPNruYSMk
 
 Technical Video: https://youtu.be/-qzcmOnRHUw
 
+Setting up Helpers and Notifcations: https://youtu.be/nKuBQElTua8
+
 Etsy (purchase): https://www.etsy.com/listing/4555225886/freezer-monitor-for-home-assistant
 
 ## Requirements
