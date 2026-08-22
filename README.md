@@ -114,7 +114,7 @@ The monitor reports alert state to Home Assistant; it does not directly send pus
 
 ### Import the alert blueprint
 
-The **Freezer Monitor Alerts** blueprint builds the automation for you. It sends the high temperature alert, repeats it until the freezer recovers, sends a recovery message, and can press **Acknowledge Freezer Alarm** on your behalf so the monitor resumes normal power cycling. Low battery and missed heartbeat alerts are included and are off by default.
+The **Freezer Monitor Alerts** blueprint builds the automation for you. It sends the high temperature alert, repeats it until the freezer recovers, sends a recovery message, and can press **Acknowledge Freezer Alarm** on your behalf, so a monitor that has finished setup resumes power cycling on its own. Low battery and missed heartbeat alerts are included and are off by default.
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Ftechdregs%2FFreezer_Monitor%2Fblob%2Fmain%2FBlueprints%2Ffreezer_monitor_alerts.yaml)
 
@@ -126,7 +126,7 @@ The **Freezer Monitor Alerts** blueprint builds the automation for you. It sends
 
 The blueprint re-sends the alert every 15 minutes until the freezer drops below **Clear Temp Threshold**. Set the repeat interval to 0 to alert only once.
 
-To turn on the extra alerts, open the collapsed sections and raise their thresholds above 0. **Low battery alert** fires when Battery Percentage drops below the value you pick. **Missed heartbeat alert** fires when **Last Wake Time** has not changed for longer than you allow, which catches a flat battery, a Wi-Fi outage, or a monitor that has stopped waking. Set it comfortably longer than your **Wake Interval Hours**, for example 26 hours on the default 12 hour heartbeat.
+To turn on the extra alerts, open the collapsed sections and raise their thresholds above 0. **Low battery alert** fires when Battery Percentage drops below the value you pick. **Missed heartbeat alert** fires when **Last Wake Time** has not changed for longer than you allow, which catches a flat battery, a Wi-Fi outage, or a monitor that has stopped waking. Set it comfortably longer than your **Wake Interval Hours**, for example 26 hours on the default 12 hour heartbeat. Restarting Home Assistant restarts that clock.
 
 ### Build the automation yourself
 

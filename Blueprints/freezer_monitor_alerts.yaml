@@ -17,6 +17,8 @@ blueprint:
     These variables are available inside every action block:
     `freezer_temp`, `battery_level`, `last_wake`, `elapsed_hours`.
   domain: automation
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/techdregs/Freezer_Monitor/blob/main/Blueprints/freezer_monitor_alerts.yaml
   input:
     device_entities:
@@ -151,7 +153,8 @@ blueprint:
             Alert if Last Wake Time has not changed for this long. The monitor
             wakes every 12 hours by default, so pick something comfortably
             longer than your Wake Interval Hours setting. Set to 0 to turn this
-            off.
+            off. Restarting Home Assistant restarts this clock, so a Home
+            Assistant that restarts more often than this will not alert.
           default: 0
           selector:
             number:
@@ -197,23 +200,26 @@ triggers:
   - alias: Freezer went above the high temperature threshold
     trigger: state
     entity_id: !input high_temp_alert
-    from: "off"
     to: "on"
     id: too_warm
   - alias: Freezer came back below the clear threshold
     trigger: state
     entity_id: !input high_temp_alert
-    from: "on"
     to: "off"
+    not_from:
+      - unknown
+      - unavailable
     id: recovered
   - alias: Battery dropped below the threshold
     trigger: numeric_state
     entity_id: !input battery_percentage
     below: !input battery_threshold
     id: battery_low
-  - alias: Heartbeat watchdog re-check
-    trigger: time_pattern
-    minutes: "/30"
+  - alias: Last Wake Time has gone stale
+    trigger: state
+    entity_id: !input last_wake_time
+    for:
+      hours: !input stale_hours
     id: watchdog
 
 conditions: []
@@ -235,14 +241,26 @@ actions:
             then:
               - repeat:
                   sequence:
-                    - alias: Wait for the repeat interval
-                      delay:
+                    - alias: Wait for recovery, or for the repeat interval
+                      wait_for_trigger:
+                        - alias: Freezer came back below the clear threshold
+                          trigger: state
+                          entity_id: !input high_temp_alert
+                          to: "off"
+                      timeout:
                         minutes: "{{ repeat_minutes | int(0) }}"
+                      continue_on_timeout: true
                     - alias: Re-alert if the freezer is still too warm
                       if:
                         - condition: template
-                          value_template: "{{ is_state(alert_entity, 'on') }}"
-                      then: !input alert_actions
+                          value_template: "{{ wait.trigger is none and is_state(alert_entity, 'on') }}"
+                      then:
+                        - alias: Refresh the temperature for this message
+                          variables:
+                            freezer_temp: "{{ states(temp_entity, with_unit=true) }}"
+                        - alias: Run the alert actions again
+                          choose: []
+                          default: !input alert_actions
                   until:
                     - condition: template
                       value_template: "{{ not is_state(alert_entity, 'on') }}"
@@ -280,9 +298,7 @@ actions:
             id: watchdog
           - condition: template
             value_template: "{{ stale_hours | int(0) > 0 }}"
-          - alias: Staleness crossed the limit within this check window
+          - alias: The monitor is not simply reporting an invalid RTC time
             condition: template
-            value_template: >-
-              {{ elapsed_hours | float(0) >= stale_hours | int(0)
-                 and elapsed_hours | float(0) < (stale_hours | int(0)) + 0.5 }}
+            value_template: "{{ states(wake_entity) not in ['unknown', 'unavailable'] }}"
         sequence: !input heartbeat_actions
