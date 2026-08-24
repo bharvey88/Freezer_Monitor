@@ -12,6 +12,23 @@ Setting up Helpers and Notifcations: https://youtu.be/nKuBQElTua8
 
 Etsy (purchase): https://www.etsy.com/listing/4555225886/freezer-monitor-for-home-assistant
 
+## Contents
+
+- [Requirements](#requirements)
+- [Assemble and charge](#assemble-and-charge)
+  - [Replacement battery safety](#replacement-battery-safety)
+- [First-time setup](#first-time-setup)
+- [How it works](#how-it-works)
+  - [Optional persistent Keep Awake helper](#optional-persistent-keep-awake-helper)
+- [Device controls and readings](#device-controls-and-readings)
+- [Alerts and notifications](#alerts-and-notifications)
+  - [Create a phone push or email alert](#create-a-phone-push-or-email-alert)
+- [Updating and advanced ESPHome use](#updating-and-advanced-esphome-use)
+  - [Manual USB flashing](#manual-usb-flashing)
+- [Errata](#errata)
+- [Project files](#project-files)
+- [Troubleshooting](#troubleshooting)
+
 ## Requirements
 
 - Home Assistant with the ESPHome add-on or integration installed.
@@ -137,6 +154,29 @@ Compiling the adopted YAML requires Internet access from the ESPHome host. It do
 
 Serial logs are disabled in the shipped firmware (`logger.baud_rate: 0`) to reduce power use.
 
+### Manual USB flashing
+
+Use manual flashing only to recover a device or install the supplied precompiled firmware. This can be done with either ESPHome Web or esptool. Keep the monitor connected to USB power throughout this process. Erasing flash removes all saved Wi-Fi credentials, the API encryption key, and device settings; complete first-time setup again afterward.
+
+#### with ESPHome Web
+
+No local ESPHome or `esptool` installation is required. In Chrome, Edge, or another browser with Web Serial support, open [ESPHome Web](https://web.esphome.io/), connect the monitor's USB serial port, select **Install**, then select [the factory firmware](Firmware/freezer-monitor-firmware.factory.0.1.1.bin).
+
+#### with esptool via command line
+
+Install `esptool` first. With Python installed, run:
+
+```bash
+python3 -m pip install --user esptool
+```
+
+Then erase and flash the device. Replace `/dev/ttyACM0` with its serial port, such as `COM3` on Windows:
+
+```bash
+esptool --chip esp32c3 --port /dev/ttyACM0 erase-flash
+esptool --chip esp32c3 --port /dev/ttyACM0 write-flash 0x0 Firmware/freezer-monitor-firmware.factory.0.1.1.bin
+```
+
 ## Errata
 
 There is a silkscreen error on the back of the PCB for the probe pins. This will not affect the device use unless you wish to make your own probe.
@@ -146,6 +186,7 @@ There is a silkscreen error on the back of the PCB for the probe pins. This will
 ## Project files
 
 - [ESPHome YAML](YAML/Freezer_Monitor.yaml)
+- [Precompiled factory firmware 0.1.1](Firmware/freezer-monitor-firmware.factory.0.1.1.bin)
 - Schematics: [main PCB](Schematics/Freezer%20Monitor%200.5.pdf), [flat probe cable](Schematics/Flat_NTC.pdf), and [KiCad FPC footprint](Schematics/FPC_Footprint/FPC8_1.0mm.kicad_mod)
 - Datasheets: [ESP32-C3-MINI-1](Datasheets/esp32-c3-mini-1_datasheet_en.pdf), [RX8111CE RTC](Datasheets/RX8111CE_en.pdf), and [TMP102](Datasheets/TMP102_UMW.pdf)
 - Enclosure models: [housing](Enclosure/Freezer%20Monitor%20v0.5%20Enclosure-Housing.3mf), [lid](Enclosure/Freezer%20Monitor%20v0.5%20Enclosure-Lid.3mf), and [complete enclosure STEP](Enclosure/Freezer%20Monitor%20v0.5%20Enclosure.step)
