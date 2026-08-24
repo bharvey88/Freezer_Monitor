@@ -8,7 +8,7 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: "techdregs.freezer-monitor"
-    version: "0.1.2"
+    version: "0.1.3"
   on_boot:
     - priority: 500
       then:
@@ -532,43 +532,58 @@ script:
                 level: WARN
                 format: "Next RTC alarm set; power cut routine started."
 
-            # Request a clean API disconnect before releasing the RTC interrupt.
-            - lambda: |-
-                using namespace esphome::api;
-
-                if (global_api_server != nullptr &&
-                    global_api_server->is_connected_with_state_subscription()) {
-                  global_api_server->on_shutdown();
-
-                  // Give Home Assistant up to five seconds to acknowledge the
-                  // disconnect and close the API connection.
-                  const uint32_t start = millis();
-                  while (millis() - start < 5000) {
-                    if (global_api_server->teardown()) {
-                      break;
-                    }
-                    delay(10);
-                  }
-                }
-            #- delay: 10ms #add delay if alarm isn't setting.
-            
-            - logger.log:
-                level: WARN
-                format: "Cutting power"
-
-            - switch.turn_off: tmp_power
-
-            - rx8xxx.clear_alarm_flag:
-                id: rx8111
-
-            - rx8xxx.clear_event_flag:
-                id: rx8111
-
+            # Refresh TMP102 status. Its update schedules a read after 50 ms.
+            - component.update: freezer_temperature
             - delay: 100ms
 
-            - logger.log:
-                level: ERROR
-                format: "Power appears to still be on"
+            # Do not release the RTC interrupt while the freezer comparator is
+            # active. In comparator mode, it clears only below Clear Temp Threshold.
+            - if:
+                condition:
+                  lambda: |-
+                    return id(high_temp_alert).has_state() &&
+                           !id(high_temp_alert).state;
+                then:
+                  # Request a clean API disconnect before releasing the RTC interrupt.
+                  - lambda: |-
+                      using namespace esphome::api;
+
+                      if (global_api_server != nullptr &&
+                          global_api_server->is_connected_with_state_subscription()) {
+                        global_api_server->on_shutdown();
+
+                        // Give Home Assistant up to five seconds to acknowledge the
+                        // disconnect and close the API connection.
+                        const uint32_t start = millis();
+                        while (millis() - start < 5000) {
+                          if (global_api_server->teardown()) {
+                            break;
+                          }
+                          delay(10);
+                        }
+                      }
+
+                  - logger.log:
+                      level: WARN
+                      format: "Cutting power"
+
+                  - switch.turn_off: tmp_power
+
+                  - rx8xxx.clear_alarm_flag:
+                      id: rx8111
+
+                  - rx8xxx.clear_event_flag:
+                      id: rx8111
+
+                  - delay: 100ms
+
+                  - logger.log:
+                      level: ERROR
+                      format: "Power appears to still be on"
+                else:
+                  - logger.log:
+                      level: WARN
+                      format: "Power cut blocked: freezer temperature has not cleared"
 
           else:
             - logger.log:

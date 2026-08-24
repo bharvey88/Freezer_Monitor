@@ -134,10 +134,27 @@ The monitor reports alert state to Home Assistant; it does not directly send pus
 1. In Home Assistant, open **Settings → Automations & Scenes → Create Automation**.
 2. Create a new empty automation and add a **State** trigger.
 3. Select this monitor **High Temp Alert** entity and set **To** to `on`.
-4. Add an action:
-   - For phone push, choose the notification service for the Home Assistant Companion App on your phone.
-   - For email, choose your already configured Home Assistant email notification service.
-5. Add a title and message, such as `Freezer temperature alert` and `Check the freezer monitor.` Save the automation.
+4. For a phone notification, add the following action in the automation YAML editor. Replace `notify.mobile_app_your_phone` with your phone's Home Assistant Companion App notification service. Tapping the notification opens the triggering entity; **View Sensor** adds an explicit action button.
+
+```yaml
+- action: notify.mobile_app_your_phone
+  data:
+    title: "Freezer temperature alert"
+    message: "Check the freezer monitor."
+    data:
+      # Keep only the line for your phone's OS; remove the other.
+      # Android notification tap target:
+      clickAction: "entityId:{{ trigger.entity_id }}"
+      # iPhone/iPad notification tap target:
+      url: "entityId:{{ trigger.entity_id }}"
+      actions:
+        - action: URI
+          title: View Sensor
+          uri: "entityId:{{ trigger.entity_id }}"
+```
+
+5. For email instead, add your already configured Home Assistant email notification service and a title/message such as `Freezer temperature alert` and `Check the freezer monitor.`
+6. Save the automation.
 
 Optional: create a second automation triggered when **High Temp Alert** changes to `off` to send a recovery notification.
 
