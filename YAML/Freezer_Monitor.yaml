@@ -8,7 +8,7 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: "techdregs.freezer-monitor"
-    version: "0.1.1"
+    version: "0.1.2"
   on_boot:
     - priority: 500
       then:
@@ -377,13 +377,15 @@ button:
     name: "Acknowledge Freezer Alarm"
     on_press:
       then:
-        - rx8xxx.clear_event_flag:
-            id: rx8111
         - if:
             condition:
               lambda: 'return !id(keep_on_for_testing);'
             then:
               - script.execute: pmos_cycle
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "Disable Keep On for Configuration, then acknowledge the alarm again"
 
 deep_sleep:
   id: deep_sleep_dummy #Prevents HA from showing "unavailable"
@@ -530,18 +532,21 @@ script:
                 level: WARN
                 format: "Next RTC alarm set; power cut routine started."
 
-            # Lambda to simulate normal device disconnect. Prevents HA from showing "unavailable".
+            # Request a clean API disconnect before releasing the RTC interrupt.
             - lambda: |-
                 using namespace esphome::api;
-      
-                if (global_api_server != nullptr) {
-                  global_api_server->on_shutdown();  // initiate polite disconnect
-      
-                  // Give it a short window to flush disconnect + close connections.
+
+                if (global_api_server != nullptr &&
+                    global_api_server->is_connected_with_state_subscription()) {
+                  global_api_server->on_shutdown();
+
+                  // Give Home Assistant up to five seconds to acknowledge the
+                  // disconnect and close the API connection.
                   const uint32_t start = millis();
                   while (millis() - start < 5000) {
-                    if (global_api_server->teardown())  // true when finished
+                    if (global_api_server->teardown()) {
                       break;
+                    }
                     delay(10);
                   }
                 }
