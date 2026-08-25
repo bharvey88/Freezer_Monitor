@@ -167,7 +167,7 @@ As an alternative to building the automations above by hand, the **Freezer Monit
 
 1. Click the badge above. If it does not open, copy `https://github.com/techdregs/Freezer_Monitor/blob/main/Blueprints/freezer_monitor_alerts.yaml` into **Settings → Automations & Scenes → Blueprints → Import Blueprint**.
 2. Click **Create Automation** on the imported blueprint.
-3. Pick the five Freezer Monitor entities it asks for: High Temp Alert, Freezer Temperature, Acknowledge Freezer Alarm, Battery Percentage, and Last Wake Time.
+3. Pick your Freezer Monitor from the device dropdown. The blueprint finds the entities it needs by itself. If you have renamed the monitor's entity IDs, open **Manual entity overrides** and pick them by hand.
 4. Under **When the freezer is too warm**, replace the default Home Assistant notification with your Companion App notify action for phone push, or your configured email notify action. The phone notification action shown above works here too.
 5. Save.
 

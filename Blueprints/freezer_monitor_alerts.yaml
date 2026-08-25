@@ -1,7 +1,8 @@
 blueprint:
   name: Freezer Monitor Alerts
   description: >-
-    Notifications for the techdregs Freezer Monitor.
+    Notifications for the techdregs Freezer Monitor. Pick your monitor from
+    the device dropdown and the blueprint finds its entities by itself.
 
 
     Sends an alert when the freezer goes above the High Temp Threshold and
@@ -21,46 +22,17 @@ blueprint:
     min_version: 2024.10.0
   source_url: https://github.com/techdregs/Freezer_Monitor/blob/main/Blueprints/freezer_monitor_alerts.yaml
   input:
-    device_entities:
-      name: Freezer Monitor entities
-      description: Pick these from your Freezer Monitor device.
+    device:
+      name: Freezer Monitor
+      description: Select your Freezer Monitor from the dropdown.
       icon: mdi:snowflake-thermometer
-      input:
-        high_temp_alert:
-          name: High Temp Alert
-          selector:
-            entity:
-              filter:
-                domain: binary_sensor
-                integration: esphome
-        freezer_temperature:
-          name: Freezer Temperature
-          selector:
-            entity:
-              filter:
-                domain: sensor
-                integration: esphome
-        acknowledge_button:
-          name: Acknowledge Freezer Alarm
-          selector:
-            entity:
-              filter:
-                domain: button
-                integration: esphome
-        battery_percentage:
-          name: Battery Percentage
-          selector:
-            entity:
-              filter:
-                domain: sensor
-                integration: esphome
-        last_wake_time:
-          name: Last Wake Time
-          selector:
-            entity:
-              filter:
-                domain: sensor
-                integration: esphome
+      selector:
+        device:
+          filter:
+            - integration: esphome
+              manufacturer: techdregs
+              model: freezer-monitor
+          multiple: false
 
     temperature_section:
       name: Temperature alert
@@ -176,15 +148,104 @@ blueprint:
           selector:
             action: {}
 
+    overrides_section:
+      name: Manual entity overrides
+      icon: mdi:pencil-outline
+      collapsed: true
+      description: >-
+        Leave these empty. The blueprint matches the monitor's entities by
+        their default entity IDs; only pick entities here if you have renamed
+        them.
+      input:
+        high_temp_alert_override:
+          name: High Temp Alert
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: binary_sensor
+                integration: esphome
+        freezer_temperature_override:
+          name: Freezer Temperature
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                integration: esphome
+        acknowledge_button_override:
+          name: Acknowledge Freezer Alarm
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: button
+                integration: esphome
+        battery_percentage_override:
+          name: Battery Percentage
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                integration: esphome
+        last_wake_time_override:
+          name: Last Wake Time
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                integration: esphome
+
 mode: parallel
 max: 10
 max_exceeded: silent
 
+# Entity resolution lives twice on purpose. trigger_variables are only usable
+# inside triggers, and the runtime variables below are not usable in triggers,
+# so both need their own copy.
+trigger_variables:
+  fm_device: !input device
+  fm_entities: "{{ device_entities(fm_device) }}"
+  alert_override: !input high_temp_alert_override
+  battery_override: !input battery_percentage_override
+  wake_override: !input last_wake_time_override
+  t_battery_threshold: !input battery_threshold
+  t_stale_hours: !input stale_hours
+  alert_entity: >-
+    {{ alert_override if alert_override else
+       fm_entities | select('search', '^binary_sensor\..*high_temp_alert$') | list | first | default('') }}
+  battery_entity: >-
+    {{ battery_override if battery_override else
+       fm_entities | select('search', '^sensor\..*battery_percentage$') | list | first | default('') }}
+  wake_entity: >-
+    {{ wake_override if wake_override else
+       fm_entities | select('search', '^sensor\..*last_wake_time$') | list | first | default('') }}
+
 variables:
-  alert_entity: !input high_temp_alert
-  temp_entity: !input freezer_temperature
-  battery_entity: !input battery_percentage
-  wake_entity: !input last_wake_time
+  fm_device: !input device
+  fm_entities: "{{ device_entities(fm_device) }}"
+  alert_override: !input high_temp_alert_override
+  temp_override: !input freezer_temperature_override
+  ack_override: !input acknowledge_button_override
+  battery_override: !input battery_percentage_override
+  wake_override: !input last_wake_time_override
+  alert_entity: >-
+    {{ alert_override if alert_override else
+       fm_entities | select('search', '^binary_sensor\..*high_temp_alert$') | list | first | default('') }}
+  temp_entity: >-
+    {{ temp_override if temp_override else
+       fm_entities | select('search', '^sensor\..*freezer_temperature$') | list | first | default('') }}
+  ack_entity: >-
+    {{ ack_override if ack_override else
+       fm_entities | select('search', '^button\..*acknowledge_freezer_alarm$') | list | first | default('') }}
+  battery_entity: >-
+    {{ battery_override if battery_override else
+       fm_entities | select('search', '^sensor\..*battery_percentage$') | list | first | default('') }}
+  wake_entity: >-
+    {{ wake_override if wake_override else
+       fm_entities | select('search', '^sensor\..*last_wake_time$') | list | first | default('') }}
   repeat_minutes: !input repeat_minutes
   stale_hours: !input stale_hours
   battery_threshold: !input battery_threshold
@@ -197,29 +258,24 @@ variables:
        ((now() - states[wake_entity].last_changed).total_seconds() / 3600) | round(1) }}
 
 triggers:
-  - alias: Freezer went above the high temperature threshold
-    trigger: state
-    entity_id: !input high_temp_alert
-    to: "on"
-    id: too_warm
-  - alias: Freezer came back below the clear threshold
-    trigger: state
-    entity_id: !input high_temp_alert
-    to: "off"
-    not_from:
-      - unknown
-      - unavailable
-    id: recovered
+  - alias: The High Temp Alert entity changed state
+    trigger: event
+    event_type: state_changed
+    event_data:
+      entity_id: "{{ alert_entity }}"
+    id: alert_changed
   - alias: Battery dropped below the threshold
-    trigger: numeric_state
-    entity_id: !input battery_percentage
-    below: !input battery_threshold
+    trigger: template
+    value_template: >-
+      {{ t_battery_threshold | int(0) > 0 and battery_entity != '' and
+         states(battery_entity) | float(101) < t_battery_threshold | int(0) }}
     id: battery_low
   - alias: Last Wake Time has gone stale
-    trigger: state
-    entity_id: !input last_wake_time
-    for:
-      hours: !input stale_hours
+    trigger: template
+    value_template: >-
+      {{ t_stale_hours | int(0) > 0 and wake_entity != '' and
+         states(wake_entity) not in ['unknown', 'unavailable'] and
+         now() - states[wake_entity].last_changed > timedelta(hours=t_stale_hours | int(0)) }}
     id: watchdog
 
 conditions: []
@@ -229,7 +285,14 @@ actions:
       - alias: Freezer is too warm
         conditions:
           - condition: trigger
-            id: too_warm
+            id: alert_changed
+          - alias: High Temp Alert turned on
+            condition: template
+            value_template: >-
+              {{ trigger.event.data.new_state is not none and
+                 trigger.event.data.new_state.state == 'on' and
+                 trigger.event.data.old_state is not none and
+                 trigger.event.data.old_state.state != 'on' }}
         sequence:
           - alias: Run the alert actions
             choose: []
@@ -242,18 +305,14 @@ actions:
               - repeat:
                   sequence:
                     - alias: Wait for recovery, or for the repeat interval
-                      wait_for_trigger:
-                        - alias: Freezer came back below the clear threshold
-                          trigger: state
-                          entity_id: !input high_temp_alert
-                          to: "off"
+                      wait_template: "{{ is_state(alert_entity, 'off') }}"
                       timeout:
                         minutes: "{{ repeat_minutes | int(0) }}"
                       continue_on_timeout: true
                     - alias: Re-alert if the freezer is still too warm
                       if:
                         - condition: template
-                          value_template: "{{ wait.trigger is none and is_state(alert_entity, 'on') }}"
+                          value_template: "{{ not wait.completed and is_state(alert_entity, 'on') }}"
                       then:
                         - alias: Refresh the temperature for this message
                           variables:
@@ -268,7 +327,14 @@ actions:
       - alias: Freezer recovered
         conditions:
           - condition: trigger
-            id: recovered
+            id: alert_changed
+          - alias: High Temp Alert turned off after an alert
+            condition: template
+            value_template: >-
+              {{ trigger.event.data.new_state is not none and
+                 trigger.event.data.new_state.state == 'off' and
+                 trigger.event.data.old_state is not none and
+                 trigger.event.data.old_state.state == 'on' }}
         sequence:
           - alias: Run the recovery actions
             choose: []
@@ -276,29 +342,22 @@ actions:
           - alias: Acknowledge the alarm on the monitor
             if:
               - condition: template
-                value_template: "{{ auto_acknowledge }}"
+                value_template: "{{ auto_acknowledge and ack_entity != '' }}"
             then:
               - alias: Press Acknowledge Freezer Alarm
                 action: button.press
                 target:
-                  entity_id: !input acknowledge_button
+                  entity_id: "{{ ack_entity }}"
                 continue_on_error: true
 
       - alias: Battery is low
         conditions:
           - condition: trigger
             id: battery_low
-          - condition: template
-            value_template: "{{ battery_threshold | int(0) > 0 }}"
         sequence: !input battery_actions
 
       - alias: Monitor has not checked in
         conditions:
           - condition: trigger
             id: watchdog
-          - condition: template
-            value_template: "{{ stale_hours | int(0) > 0 }}"
-          - alias: The monitor is not simply reporting an invalid RTC time
-            condition: template
-            value_template: "{{ states(wake_entity) not in ['unknown', 'unavailable'] }}"
         sequence: !input heartbeat_actions
