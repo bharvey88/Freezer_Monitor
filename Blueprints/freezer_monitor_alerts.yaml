@@ -25,7 +25,6 @@ blueprint:
     device:
       name: Freezer Monitor
       description: Select your Freezer Monitor from the dropdown.
-      icon: mdi:snowflake-thermometer
       selector:
         device:
           filter:
