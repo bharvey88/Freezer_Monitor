@@ -287,6 +287,11 @@ sensor:
     accuracy_decimals: 0
     update_interval: 5s
     lambda: |-
+      // Skip the publish until the ADC has a reading. Reading .state
+      // before then yields an unset value that the clamp floors to 0%.
+      if (!id(battery_voltage).has_state()) {
+        return {};
+      }
       return id(battery_voltage).state;
     filters:
       - calibrate_linear:
