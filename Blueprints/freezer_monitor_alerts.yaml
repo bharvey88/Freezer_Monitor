@@ -269,6 +269,12 @@ triggers:
       {{ t_battery_threshold | int(0) > 0 and battery_entity != '' and
          states(battery_entity) | float(101) < t_battery_threshold | int(0) }}
     id: battery_low
+    # The monitor publishes one bogus 0% reading on some wakes, before its
+    # battery voltage sensor has taken a reading. It corrects itself a few
+    # seconds later, so hold the trigger long enough to ride that out. A real
+    # low battery stays below the threshold for the whole sleep window.
+    for:
+      minutes: 5
   - alias: Last Wake Time has gone stale
     trigger: template
     value_template: >-
